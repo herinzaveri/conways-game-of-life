@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   PRESET_PATTERNS,
   cellKey,
@@ -18,25 +18,27 @@ import {
   PlayIcon,
 } from "./transport-icons";
 
-const WRAPPER_WIDTH = 768;
-const WRAPPER_HEIGHT = 448;
+const MAX_WRAPPER_WIDTH = 768;
+const ASPECT_RATIO = 448 / 768;
 const DEFAULT_CELL_PX = 16;
 const MIN_CELL_PX = 8;
 const MAX_CELL_PX = DEFAULT_CELL_PX;
 const MIN_SPEED = 1;
 const MAX_SPEED = 30;
 
-function colsForCellSize(cellSize: number) {
-  return Math.ceil(WRAPPER_WIDTH / cellSize);
+function colsFor(width: number, cellSize: number) {
+  return Math.ceil(width / cellSize);
 }
 
-function rowsForCellSize(cellSize: number) {
-  return Math.ceil(WRAPPER_HEIGHT / cellSize);
+function rowsFor(height: number, cellSize: number) {
+  return Math.ceil(height / cellSize);
 }
 
 const INITIAL_OFFSET = {
-  x: -Math.floor(colsForCellSize(DEFAULT_CELL_PX) / 2),
-  y: -Math.floor(rowsForCellSize(DEFAULT_CELL_PX) / 2),
+  x: -Math.floor(colsFor(MAX_WRAPPER_WIDTH, DEFAULT_CELL_PX) / 2),
+  y: -Math.floor(
+    rowsFor(Math.round(MAX_WRAPPER_WIDTH * ASPECT_RATIO), DEFAULT_CELL_PX) / 2
+  ),
 };
 
 function createInitialCells(): LiveCells {
@@ -45,21 +47,44 @@ function createInitialCells(): LiveCells {
   return placePattern(pulsar, -Math.floor(w / 2), -Math.floor(h / 2));
 }
 
+function touchDistance(a: Touch, b: Touch) {
+  return Math.hypot(b.clientX - a.clientX, b.clientY - a.clientY);
+}
+
 export default function GameOfLifeBoard() {
   const [liveCells, setLiveCells] = useState<LiveCells>(createInitialCells);
   const [offset, setOffset] = useState(INITIAL_OFFSET);
   const [cellSize, setCellSize] = useState(DEFAULT_CELL_PX);
+  const [wrapperWidth, setWrapperWidth] = useState(MAX_WRAPPER_WIDTH);
   const [generation, setGeneration] = useState(0);
   const [running, setRunning] = useState(false);
   const [speed, setSpeed] = useState(8);
   const [selectedPreset, setSelectedPreset] = useState<string | null>("Pulsar");
   const [history, setHistory] = useState<LiveCells[]>([]);
+
+  const outerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const liveCellsRef = useRef<LiveCells>(liveCells);
+  const offsetRef = useRef(offset);
+  const cellSizeRef = useRef(cellSize);
+  const wrapperWidthRef = useRef(wrapperWidth);
 
   useEffect(() => {
     liveCellsRef.current = liveCells;
   }, [liveCells]);
+  useEffect(() => {
+    offsetRef.current = offset;
+  }, [offset]);
+  useEffect(() => {
+    cellSizeRef.current = cellSize;
+  }, [cellSize]);
+  useEffect(() => {
+    wrapperWidthRef.current = wrapperWidth;
+  }, [wrapperWidth]);
+
+  const wrapperHeight = Math.round(wrapperWidth * ASPECT_RATIO);
+  const cols = colsFor(wrapperWidth, cellSize);
+  const rows = rowsFor(wrapperHeight, cellSize);
 
   function stepForward() {
     setHistory((h) => [...h, liveCellsRef.current]);
@@ -81,40 +106,69 @@ export default function GameOfLifeBoard() {
     return () => clearInterval(id);
   }, [running, speed]);
 
-  useEffect(() => {
-    const el = wrapperRef.current;
+  // Recenters the view on the same absolute point after the visible
+  // column/row count changes (from a zoom or a container resize).
+  function recenterForDimensionChange(
+    prevCols: number,
+    prevRows: number,
+    nextCols: number,
+    nextRows: number
+  ) {
+    setOffset((prevOffset) => ({
+      x: prevOffset.x + Math.floor((prevCols - nextCols) / 2),
+      y: prevOffset.y + Math.floor((prevRows - nextRows) / 2),
+    }));
+  }
+
+  function applyZoom(factor: number) {
+    const prevSize = cellSizeRef.current;
+    let nextSize = Math.round(prevSize * factor);
+    if (nextSize === prevSize) {
+      nextSize = prevSize + (factor > 1 ? 1 : -1);
+    }
+    nextSize = Math.min(MAX_CELL_PX, Math.max(MIN_CELL_PX, nextSize));
+    if (nextSize === prevSize) return;
+
+    const width = wrapperWidthRef.current;
+    const height = Math.round(width * ASPECT_RATIO);
+    recenterForDimensionChange(
+      colsFor(width, prevSize),
+      rowsFor(height, prevSize),
+      colsFor(width, nextSize),
+      rowsFor(height, nextSize)
+    );
+    setCellSize(nextSize);
+  }
+
+  // Measures the responsive container and keeps the pixel-sized grid in
+  // sync with it, recentering the view when the visible area changes.
+  useLayoutEffect(() => {
+    const el = outerRef.current;
     if (!el) return;
 
-    function onWheel(e: WheelEvent) {
-      e.preventDefault();
-      setCellSize((prevSize) => {
-        const factor = e.deltaY > 0 ? 0.85 : 1 / 0.85;
-        let nextSize = Math.round(prevSize * factor);
-        if (nextSize === prevSize) {
-          nextSize = prevSize + (e.deltaY > 0 ? -1 : 1);
-        }
-        nextSize = Math.min(MAX_CELL_PX, Math.max(MIN_CELL_PX, nextSize));
-        if (nextSize === prevSize) return prevSize;
-
-        const prevCols = colsForCellSize(prevSize);
-        const prevRows = rowsForCellSize(prevSize);
-        const nextCols = colsForCellSize(nextSize);
-        const nextRows = rowsForCellSize(nextSize);
-        setOffset((prevOffset) => ({
-          x: prevOffset.x + Math.floor((prevCols - nextCols) / 2),
-          y: prevOffset.y + Math.floor((prevRows - nextRows) / 2),
-        }));
-
-        return nextSize;
-      });
+    function applyWidth(width: number) {
+      const prevWidth = wrapperWidthRef.current;
+      if (width === prevWidth) return;
+      const size = cellSizeRef.current;
+      const prevHeight = Math.round(prevWidth * ASPECT_RATIO);
+      const nextHeight = Math.round(width * ASPECT_RATIO);
+      recenterForDimensionChange(
+        colsFor(prevWidth, size),
+        rowsFor(prevHeight, size),
+        colsFor(width, size),
+        rowsFor(nextHeight, size)
+      );
+      setWrapperWidth(width);
     }
 
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
+    applyWidth(Math.max(200, Math.round(el.getBoundingClientRect().width)));
 
-  const cols = colsForCellSize(cellSize);
-  const rows = rowsForCellSize(cellSize);
+    const observer = new ResizeObserver((entries) => {
+      applyWidth(Math.max(200, Math.round(entries[0].contentRect.width)));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   function toggleCell(x: number, y: number) {
     setSelectedPreset(null);
@@ -125,6 +179,17 @@ export default function GameOfLifeBoard() {
       else next.add(key);
       return next;
     });
+  }
+
+  function cellFromPoint(clientX: number, clientY: number) {
+    const el = wrapperRef.current;
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    const size = cellSizeRef.current;
+    const off = offsetRef.current;
+    const col = Math.floor((clientX - rect.left) / size);
+    const row = Math.floor((clientY - rect.top) / size);
+    return { x: off.x + col, y: off.y + row };
   }
 
   function handleCellMouseDown(e: React.MouseEvent, x: number, y: number) {
@@ -158,6 +223,101 @@ export default function GameOfLifeBoard() {
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
   }
+
+  // Wheel-to-zoom (desktop) and touch pan / tap-to-toggle / pinch-to-zoom
+  // (mobile), wired up as native listeners so gestures stay smooth and
+  // page scroll/zoom doesn't fight with them.
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      applyZoom(e.deltaY > 0 ? 0.85 : 1 / 0.85);
+    }
+
+    let mode: "none" | "pan" | "pinch" = "none";
+    let dragged = false;
+    let startClientX = 0;
+    let startClientY = 0;
+    let startOffset = { x: 0, y: 0 };
+    let startCellSize = DEFAULT_CELL_PX;
+    let pinchStartDist = 0;
+    let tapTarget: { x: number; y: number } | null = null;
+
+    function beginPan(touch: Touch) {
+      mode = "pan";
+      dragged = false;
+      startClientX = touch.clientX;
+      startClientY = touch.clientY;
+      startOffset = offsetRef.current;
+      startCellSize = cellSizeRef.current;
+      tapTarget = cellFromPoint(touch.clientX, touch.clientY);
+    }
+
+    function onTouchStart(e: TouchEvent) {
+      if (e.touches.length === 1) {
+        beginPan(e.touches[0]);
+      } else if (e.touches.length === 2) {
+        mode = "pinch";
+        pinchStartDist = touchDistance(e.touches[0], e.touches[1]);
+      }
+    }
+
+    function onTouchMove(e: TouchEvent) {
+      if (mode === "pan" && e.touches.length === 1) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const dxPx = touch.clientX - startClientX;
+        const dyPx = touch.clientY - startClientY;
+        if (!dragged && Math.hypot(dxPx, dyPx) > 6) dragged = true;
+        if (dragged) {
+          const dxCells = Math.round(dxPx / startCellSize);
+          const dyCells = Math.round(dyPx / startCellSize);
+          setOffset({
+            x: startOffset.x - dxCells,
+            y: startOffset.y - dyCells,
+          });
+        }
+      } else if (mode === "pinch" && e.touches.length === 2) {
+        e.preventDefault();
+        const dist = touchDistance(e.touches[0], e.touches[1]);
+        if (pinchStartDist > 0) applyZoom(dist / pinchStartDist);
+        pinchStartDist = dist;
+      }
+    }
+
+    function onTouchEnd(e: TouchEvent) {
+      if (mode === "pan" && !dragged && tapTarget) {
+        toggleCell(tapTarget.x, tapTarget.y);
+      }
+      if (e.touches.length === 1) {
+        beginPan(e.touches[0]);
+      } else if (e.touches.length === 0) {
+        mode = "none";
+        tapTarget = null;
+      } else {
+        mode = "pinch";
+        pinchStartDist = touchDistance(e.touches[0], e.touches[1]);
+      }
+    }
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    el.addEventListener("touchend", onTouchEnd, { passive: true });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
+      el.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("touchcancel", onTouchEnd);
+    };
+    // applyZoom only reads refs and calls stable setters, so the stale
+    // closure captured here stays correct across renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function loadPreset(pattern: Pattern) {
     const [w, h] = getPatternSize(pattern);
@@ -196,7 +356,7 @@ export default function GameOfLifeBoard() {
   const colIndices = Array.from({ length: cols }, (_, col) => col);
 
   return (
-    <div className="flex flex-col items-center gap-4">
+    <div className="flex w-full flex-col items-center gap-4">
       <div className="flex flex-wrap items-center justify-center gap-2">
         <div className="flex items-center gap-1 rounded-full border border-black/8 p-1 dark:border-white/[.145]">
           <button
@@ -281,42 +441,49 @@ export default function GameOfLifeBoard() {
         <span>Population: {liveCells.size}</span>
       </div>
 
-      <div
-        ref={wrapperRef}
-        className="select-none overflow-hidden border border-zinc-300 dark:border-zinc-700"
-        style={{ width: WRAPPER_WIDTH, height: WRAPPER_HEIGHT }}
-      >
+      <div ref={outerRef} className="w-full max-w-3xl">
         <div
+          ref={wrapperRef}
+          className="mx-auto select-none overflow-hidden border border-zinc-300 dark:border-zinc-700"
           style={{
-            display: "grid",
-            gridTemplateColumns: `repeat(${cols}, ${cellSize}px)`,
-            gridTemplateRows: `repeat(${rows}, ${cellSize}px)`,
+            width: wrapperWidth,
+            height: wrapperHeight,
+            maxWidth: "100%",
+            touchAction: "none",
           }}
         >
-          {rowIndices.map((row) =>
-            colIndices.map((col) => {
-              const x = offset.x + col;
-              const y = offset.y + row;
-              const alive = liveCells.has(cellKey(x, y));
-              return (
-                <div
-                  key={`${col}-${row}`}
-                  onMouseDown={(e) => handleCellMouseDown(e, x, y)}
-                  className={`cursor-pointer border border-zinc-100 dark:border-zinc-900 ${
-                    alive
-                      ? "bg-zinc-900 dark:bg-zinc-100"
-                      : "bg-white hover:bg-zinc-100 dark:bg-black dark:hover:bg-zinc-900"
-                  }`}
-                />
-              );
-            })
-          )}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: `repeat(${cols}, ${cellSize}px)`,
+              gridTemplateRows: `repeat(${rows}, ${cellSize}px)`,
+            }}
+          >
+            {rowIndices.map((row) =>
+              colIndices.map((col) => {
+                const x = offset.x + col;
+                const y = offset.y + row;
+                const alive = liveCells.has(cellKey(x, y));
+                return (
+                  <div
+                    key={`${col}-${row}`}
+                    onMouseDown={(e) => handleCellMouseDown(e, x, y)}
+                    className={`cursor-pointer border border-zinc-100 dark:border-zinc-900 ${
+                      alive
+                        ? "bg-zinc-900 dark:bg-zinc-100"
+                        : "bg-white hover:bg-zinc-100 dark:bg-black dark:hover:bg-zinc-900"
+                    }`}
+                  />
+                );
+              })
+            )}
+          </div>
         </div>
       </div>
 
       <p className="max-w-md text-center text-sm text-zinc-500 dark:text-zinc-500">
-        Click a cell to toggle it, click and drag to pan, and scroll to zoom
-        out on the infinite grid.
+        Tap or click a cell to toggle it, drag to pan, and pinch or scroll to
+        zoom on the infinite grid.
       </p>
     </div>
   );
