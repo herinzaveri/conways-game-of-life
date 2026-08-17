@@ -1,0 +1,221 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  PRESET_PATTERNS,
+  cellKey,
+  getPatternSize,
+  placePattern,
+  randomCells,
+  step,
+  type LiveCells,
+  type Pattern,
+} from "@/lib/game-of-life";
+
+const COLS = 48;
+const ROWS = 28;
+const CELL_PX = 16;
+const MIN_SPEED = 1;
+const MAX_SPEED = 30;
+
+const INITIAL_OFFSET = { x: -Math.floor(COLS / 2), y: -Math.floor(ROWS / 2) };
+
+function createInitialCells(): LiveCells {
+  const pulsar = PRESET_PATTERNS.find((p) => p.name === "Pulsar")!;
+  const [w, h] = getPatternSize(pulsar);
+  return placePattern(pulsar, -Math.floor(w / 2), -Math.floor(h / 2));
+}
+
+export default function GameOfLifeBoard() {
+  const [liveCells, setLiveCells] = useState<LiveCells>(createInitialCells);
+  const [offset, setOffset] = useState(INITIAL_OFFSET);
+  const [generation, setGeneration] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [speed, setSpeed] = useState(8);
+
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => {
+      setLiveCells((prev) => step(prev));
+      setGeneration((g) => g + 1);
+    }, 1000 / speed);
+    return () => clearInterval(id);
+  }, [running, speed]);
+
+  function toggleCell(x: number, y: number) {
+    setLiveCells((prev) => {
+      const key = cellKey(x, y);
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function handleCellMouseDown(e: React.MouseEvent, x: number, y: number) {
+    if (e.button !== 0) return;
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    const startOffset = offset;
+    let dragged = false;
+
+    function onMove(ev: MouseEvent) {
+      const dxPx = ev.clientX - startClientX;
+      const dyPx = ev.clientY - startClientY;
+      if (!dragged && Math.hypot(dxPx, dyPx) > 4) dragged = true;
+      if (dragged) {
+        const dxCells = Math.round(dxPx / CELL_PX);
+        const dyCells = Math.round(dyPx / CELL_PX);
+        setOffset({
+          x: startOffset.x - dxCells,
+          y: startOffset.y - dyCells,
+        });
+      }
+    }
+
+    function onUp() {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      if (!dragged) toggleCell(x, y);
+    }
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }
+
+  function loadPreset(pattern: Pattern) {
+    const [w, h] = getPatternSize(pattern);
+    const centerX = offset.x + Math.floor(COLS / 2);
+    const centerY = offset.y + Math.floor(ROWS / 2);
+    setLiveCells(
+      placePattern(pattern, centerX - Math.floor(w / 2), centerY - Math.floor(h / 2))
+    );
+    setGeneration(0);
+    setRunning(false);
+  }
+
+  function randomize() {
+    setLiveCells(randomCells(offset.x, offset.y, COLS, ROWS));
+    setGeneration(0);
+    setRunning(false);
+  }
+
+  function clearBoard() {
+    setLiveCells(new Set());
+    setGeneration(0);
+    setRunning(false);
+  }
+
+  function recenter() {
+    setOffset(INITIAL_OFFSET);
+  }
+
+  const rows = Array.from({ length: ROWS }, (_, row) => row);
+  const cols = Array.from({ length: COLS }, (_, col) => col);
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <button
+          onClick={() => setRunning((r) => !r)}
+          className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]"
+        >
+          {running ? "Pause" : "Play"}
+        </button>
+        <button
+          onClick={() => {
+            setLiveCells((prev) => step(prev));
+            setGeneration((g) => g + 1);
+          }}
+          disabled={running}
+          className="rounded-full border border-black/8 px-4 py-2 text-sm font-medium transition-colors hover:bg-black/4 disabled:opacity-40 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+        >
+          Step
+        </button>
+        <button
+          onClick={randomize}
+          className="rounded-full border border-black/8 px-4 py-2 text-sm font-medium transition-colors hover:bg-black/4 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+        >
+          Randomize
+        </button>
+        <button
+          onClick={clearBoard}
+          className="rounded-full border border-black/8 px-4 py-2 text-sm font-medium transition-colors hover:bg-black/4 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+        >
+          Clear
+        </button>
+        <button
+          onClick={recenter}
+          className="rounded-full border border-black/8 px-4 py-2 text-sm font-medium transition-colors hover:bg-black/4 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+        >
+          Center view
+        </button>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-center gap-2 text-sm">
+        <span className="text-zinc-600 dark:text-zinc-400">Speed</span>
+        <input
+          type="range"
+          min={MIN_SPEED}
+          max={MAX_SPEED}
+          value={speed}
+          onChange={(e) => setSpeed(Number(e.target.value))}
+          className="w-32 accent-foreground"
+        />
+        <span className="w-16 text-zinc-600 dark:text-zinc-400">
+          {speed} gen/s
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        <span className="text-sm text-zinc-600 dark:text-zinc-400">Presets:</span>
+        {PRESET_PATTERNS.map((pattern) => (
+          <button
+            key={pattern.name}
+            onClick={() => loadPreset(pattern)}
+            className="rounded-full border border-black/8 px-3 py-1 text-sm font-medium transition-colors hover:bg-black/4 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+          >
+            {pattern.name}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex gap-6 text-sm text-zinc-600 dark:text-zinc-400">
+        <span>Generation: {generation}</span>
+        <span>Population: {liveCells.size}</span>
+      </div>
+
+      <div
+        className="select-none overflow-hidden border border-zinc-300 dark:border-zinc-700"
+        style={{
+          display: "grid",
+          gridTemplateColumns: `repeat(${COLS}, ${CELL_PX}px)`,
+          gridTemplateRows: `repeat(${ROWS}, ${CELL_PX}px)`,
+        }}
+      >
+        {rows.map((row) =>
+          cols.map((col) => {
+            const x = offset.x + col;
+            const y = offset.y + row;
+            const alive = liveCells.has(cellKey(x, y));
+            return (
+              <div
+                key={`${col}-${row}`}
+                onMouseDown={(e) => handleCellMouseDown(e, x, y)}
+                className={`cursor-pointer border border-zinc-100 dark:border-zinc-900 ${
+                  alive
+                    ? "bg-zinc-900 dark:bg-zinc-100"
+                    : "bg-white hover:bg-zinc-100 dark:bg-black dark:hover:bg-zinc-900"
+                }`}
+              />
+            );
+          })
+        )}
+      </div>
+
+      <p className="max-w-md text-center text-sm text-zinc-500 dark:text-zinc-500">
+        Click a cell to toggle it, or click and drag to pan the infinite grid.
+      </p>
+    </div>
+  );
+}
