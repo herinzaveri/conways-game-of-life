@@ -288,6 +288,12 @@ export default function GameOfLifeBoard() {
     }
 
     function onTouchEnd(e: TouchEvent) {
+      // A quick, precise tap often never fires touchmove, so this is the
+      // only place left to preventDefault - without it, iOS synthesizes a
+      // mousedown/mouseup/click afterward, which hits the same cell's
+      // onMouseDown handler and toggles it a second time, canceling out
+      // the toggle below.
+      e.preventDefault();
       if (mode === "pan" && !dragged && tapTarget) {
         toggleCell(tapTarget.x, tapTarget.y);
       }
@@ -304,8 +310,8 @@ export default function GameOfLifeBoard() {
     el.addEventListener("wheel", onWheel, { passive: false });
     el.addEventListener("touchstart", onTouchStart, { passive: true });
     el.addEventListener("touchmove", onTouchMove, { passive: false });
-    el.addEventListener("touchend", onTouchEnd, { passive: true });
-    el.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    el.addEventListener("touchend", onTouchEnd, { passive: false });
+    el.addEventListener("touchcancel", onTouchEnd, { passive: false });
     return () => {
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("touchstart", onTouchStart);
