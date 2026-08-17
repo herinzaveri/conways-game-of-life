@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   PRESET_PATTERNS,
   cellKey,
@@ -12,13 +12,26 @@ import {
   type Pattern,
 } from "@/lib/game-of-life";
 
-const COLS = 48;
-const ROWS = 28;
-const CELL_PX = 16;
+const WRAPPER_WIDTH = 768;
+const WRAPPER_HEIGHT = 448;
+const DEFAULT_CELL_PX = 16;
+const MIN_CELL_PX = 8;
+const MAX_CELL_PX = DEFAULT_CELL_PX;
 const MIN_SPEED = 1;
 const MAX_SPEED = 30;
 
-const INITIAL_OFFSET = { x: -Math.floor(COLS / 2), y: -Math.floor(ROWS / 2) };
+function colsForCellSize(cellSize: number) {
+  return Math.ceil(WRAPPER_WIDTH / cellSize);
+}
+
+function rowsForCellSize(cellSize: number) {
+  return Math.ceil(WRAPPER_HEIGHT / cellSize);
+}
+
+const INITIAL_OFFSET = {
+  x: -Math.floor(colsForCellSize(DEFAULT_CELL_PX) / 2),
+  y: -Math.floor(rowsForCellSize(DEFAULT_CELL_PX) / 2),
+};
 
 function createInitialCells(): LiveCells {
   const pulsar = PRESET_PATTERNS.find((p) => p.name === "Pulsar")!;
@@ -29,9 +42,11 @@ function createInitialCells(): LiveCells {
 export default function GameOfLifeBoard() {
   const [liveCells, setLiveCells] = useState<LiveCells>(createInitialCells);
   const [offset, setOffset] = useState(INITIAL_OFFSET);
+  const [cellSize, setCellSize] = useState(DEFAULT_CELL_PX);
   const [generation, setGeneration] = useState(0);
   const [running, setRunning] = useState(false);
   const [speed, setSpeed] = useState(8);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!running) return;
@@ -41,6 +56,41 @@ export default function GameOfLifeBoard() {
     }, 1000 / speed);
     return () => clearInterval(id);
   }, [running, speed]);
+
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      setCellSize((prevSize) => {
+        const factor = e.deltaY > 0 ? 0.85 : 1 / 0.85;
+        let nextSize = Math.round(prevSize * factor);
+        if (nextSize === prevSize) {
+          nextSize = prevSize + (e.deltaY > 0 ? -1 : 1);
+        }
+        nextSize = Math.min(MAX_CELL_PX, Math.max(MIN_CELL_PX, nextSize));
+        if (nextSize === prevSize) return prevSize;
+
+        const prevCols = colsForCellSize(prevSize);
+        const prevRows = rowsForCellSize(prevSize);
+        const nextCols = colsForCellSize(nextSize);
+        const nextRows = rowsForCellSize(nextSize);
+        setOffset((prevOffset) => ({
+          x: prevOffset.x + Math.floor((prevCols - nextCols) / 2),
+          y: prevOffset.y + Math.floor((prevRows - nextRows) / 2),
+        }));
+
+        return nextSize;
+      });
+    }
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const cols = colsForCellSize(cellSize);
+  const rows = rowsForCellSize(cellSize);
 
   function toggleCell(x: number, y: number) {
     setLiveCells((prev) => {
@@ -57,6 +107,7 @@ export default function GameOfLifeBoard() {
     const startClientX = e.clientX;
     const startClientY = e.clientY;
     const startOffset = offset;
+    const dragCellSize = cellSize;
     let dragged = false;
 
     function onMove(ev: MouseEvent) {
@@ -64,8 +115,8 @@ export default function GameOfLifeBoard() {
       const dyPx = ev.clientY - startClientY;
       if (!dragged && Math.hypot(dxPx, dyPx) > 4) dragged = true;
       if (dragged) {
-        const dxCells = Math.round(dxPx / CELL_PX);
-        const dyCells = Math.round(dyPx / CELL_PX);
+        const dxCells = Math.round(dxPx / dragCellSize);
+        const dyCells = Math.round(dyPx / dragCellSize);
         setOffset({
           x: startOffset.x - dxCells,
           y: startOffset.y - dyCells,
@@ -85,8 +136,8 @@ export default function GameOfLifeBoard() {
 
   function loadPreset(pattern: Pattern) {
     const [w, h] = getPatternSize(pattern);
-    const centerX = offset.x + Math.floor(COLS / 2);
-    const centerY = offset.y + Math.floor(ROWS / 2);
+    const centerX = offset.x + Math.floor(cols / 2);
+    const centerY = offset.y + Math.floor(rows / 2);
     setLiveCells(
       placePattern(pattern, centerX - Math.floor(w / 2), centerY - Math.floor(h / 2))
     );
@@ -95,7 +146,7 @@ export default function GameOfLifeBoard() {
   }
 
   function randomize() {
-    setLiveCells(randomCells(offset.x, offset.y, COLS, ROWS));
+    setLiveCells(randomCells(offset.x, offset.y, cols, rows));
     setGeneration(0);
     setRunning(false);
   }
@@ -107,11 +158,11 @@ export default function GameOfLifeBoard() {
   }
 
   function recenter() {
-    setOffset(INITIAL_OFFSET);
+    setOffset({ x: -Math.floor(cols / 2), y: -Math.floor(rows / 2) });
   }
 
-  const rows = Array.from({ length: ROWS }, (_, row) => row);
-  const cols = Array.from({ length: COLS }, (_, col) => col);
+  const rowIndices = Array.from({ length: rows }, (_, row) => row);
+  const colIndices = Array.from({ length: cols }, (_, col) => col);
 
   return (
     <div className="flex flex-col items-center gap-4">
@@ -186,35 +237,41 @@ export default function GameOfLifeBoard() {
       </div>
 
       <div
+        ref={wrapperRef}
         className="select-none overflow-hidden border border-zinc-300 dark:border-zinc-700"
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${COLS}, ${CELL_PX}px)`,
-          gridTemplateRows: `repeat(${ROWS}, ${CELL_PX}px)`,
-        }}
+        style={{ width: WRAPPER_WIDTH, height: WRAPPER_HEIGHT }}
       >
-        {rows.map((row) =>
-          cols.map((col) => {
-            const x = offset.x + col;
-            const y = offset.y + row;
-            const alive = liveCells.has(cellKey(x, y));
-            return (
-              <div
-                key={`${col}-${row}`}
-                onMouseDown={(e) => handleCellMouseDown(e, x, y)}
-                className={`cursor-pointer border border-zinc-100 dark:border-zinc-900 ${
-                  alive
-                    ? "bg-zinc-900 dark:bg-zinc-100"
-                    : "bg-white hover:bg-zinc-100 dark:bg-black dark:hover:bg-zinc-900"
-                }`}
-              />
-            );
-          })
-        )}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${cols}, ${cellSize}px)`,
+            gridTemplateRows: `repeat(${rows}, ${cellSize}px)`,
+          }}
+        >
+          {rowIndices.map((row) =>
+            colIndices.map((col) => {
+              const x = offset.x + col;
+              const y = offset.y + row;
+              const alive = liveCells.has(cellKey(x, y));
+              return (
+                <div
+                  key={`${col}-${row}`}
+                  onMouseDown={(e) => handleCellMouseDown(e, x, y)}
+                  className={`cursor-pointer border border-zinc-100 dark:border-zinc-900 ${
+                    alive
+                      ? "bg-zinc-900 dark:bg-zinc-100"
+                      : "bg-white hover:bg-zinc-100 dark:bg-black dark:hover:bg-zinc-900"
+                  }`}
+                />
+              );
+            })
+          )}
+        </div>
       </div>
 
       <p className="max-w-md text-center text-sm text-zinc-500 dark:text-zinc-500">
-        Click a cell to toggle it, or click and drag to pan the infinite grid.
+        Click a cell to toggle it, click and drag to pan, and scroll to zoom
+        out on the infinite grid.
       </p>
     </div>
   );
