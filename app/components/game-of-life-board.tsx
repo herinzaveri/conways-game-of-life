@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   PRESET_PATTERNS,
   cellKey,
@@ -19,12 +19,19 @@ import {
 } from "./transport-icons";
 
 const MAX_WRAPPER_WIDTH = 768;
-const ASPECT_RATIO = 448 / 768;
+const DESKTOP_ASPECT_RATIO = 448 / 768;
+const MOBILE_ASPECT_RATIO = 1.3;
+const MOBILE_BREAKPOINT = 640;
 const DEFAULT_CELL_PX = 16;
 const MIN_CELL_PX = 8;
 const MAX_CELL_PX = DEFAULT_CELL_PX;
 const MIN_SPEED = 1;
 const MAX_SPEED = 30;
+const INITIAL_CENTER = { x: 0, y: 0 };
+
+function aspectRatioFor(width: number) {
+  return width < MOBILE_BREAKPOINT ? MOBILE_ASPECT_RATIO : DESKTOP_ASPECT_RATIO;
+}
 
 function colsFor(width: number, cellSize: number) {
   return Math.ceil(width / cellSize);
@@ -33,13 +40,6 @@ function colsFor(width: number, cellSize: number) {
 function rowsFor(height: number, cellSize: number) {
   return Math.ceil(height / cellSize);
 }
-
-const INITIAL_OFFSET = {
-  x: -Math.floor(colsFor(MAX_WRAPPER_WIDTH, DEFAULT_CELL_PX) / 2),
-  y: -Math.floor(
-    rowsFor(Math.round(MAX_WRAPPER_WIDTH * ASPECT_RATIO), DEFAULT_CELL_PX) / 2
-  ),
-};
 
 function createInitialCells(): LiveCells {
   const pulsar = PRESET_PATTERNS.find((p) => p.name === "Pulsar")!;
@@ -53,7 +53,11 @@ function touchDistance(a: Touch, b: Touch) {
 
 export default function GameOfLifeBoard() {
   const [liveCells, setLiveCells] = useState<LiveCells>(createInitialCells);
-  const [offset, setOffset] = useState(INITIAL_OFFSET);
+  // The absolute cell the view is centered on. Kept as the source of
+  // truth (instead of the top-left corner) so the visible window can be
+  // derived fresh from it whenever cols/rows change - no "recenter after
+  // the fact" math needed when zooming or resizing.
+  const [center, setCenter] = useState(INITIAL_CENTER);
   const [cellSize, setCellSize] = useState(DEFAULT_CELL_PX);
   const [wrapperWidth, setWrapperWidth] = useState(MAX_WRAPPER_WIDTH);
   const [generation, setGeneration] = useState(0);
@@ -65,26 +69,34 @@ export default function GameOfLifeBoard() {
   const outerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const liveCellsRef = useRef<LiveCells>(liveCells);
-  const offsetRef = useRef(offset);
+  const centerRef = useRef(center);
   const cellSizeRef = useRef(cellSize);
-  const wrapperWidthRef = useRef(wrapperWidth);
 
   useEffect(() => {
     liveCellsRef.current = liveCells;
   }, [liveCells]);
   useEffect(() => {
-    offsetRef.current = offset;
-  }, [offset]);
+    centerRef.current = center;
+  }, [center]);
   useEffect(() => {
     cellSizeRef.current = cellSize;
   }, [cellSize]);
-  useEffect(() => {
-    wrapperWidthRef.current = wrapperWidth;
-  }, [wrapperWidth]);
 
-  const wrapperHeight = Math.round(wrapperWidth * ASPECT_RATIO);
+  const wrapperHeight = Math.round(wrapperWidth * aspectRatioFor(wrapperWidth));
   const cols = colsFor(wrapperWidth, cellSize);
   const rows = rowsFor(wrapperHeight, cellSize);
+  const offset = useMemo(
+    () => ({
+      x: center.x - Math.floor(cols / 2),
+      y: center.y - Math.floor(rows / 2),
+    }),
+    [center.x, center.y, cols, rows]
+  );
+
+  const offsetRef = useRef(offset);
+  useEffect(() => {
+    offsetRef.current = offset;
+  }, [offset]);
 
   function stepForward() {
     setHistory((h) => [...h, liveCellsRef.current]);
@@ -106,20 +118,6 @@ export default function GameOfLifeBoard() {
     return () => clearInterval(id);
   }, [running, speed]);
 
-  // Recenters the view on the same absolute point after the visible
-  // column/row count changes (from a zoom or a container resize).
-  function recenterForDimensionChange(
-    prevCols: number,
-    prevRows: number,
-    nextCols: number,
-    nextRows: number
-  ) {
-    setOffset((prevOffset) => ({
-      x: prevOffset.x + Math.floor((prevCols - nextCols) / 2),
-      y: prevOffset.y + Math.floor((prevRows - nextRows) / 2),
-    }));
-  }
-
   function applyZoom(factor: number) {
     const prevSize = cellSizeRef.current;
     let nextSize = Math.round(prevSize * factor);
@@ -128,44 +126,23 @@ export default function GameOfLifeBoard() {
     }
     nextSize = Math.min(MAX_CELL_PX, Math.max(MIN_CELL_PX, nextSize));
     if (nextSize === prevSize) return;
-
-    const width = wrapperWidthRef.current;
-    const height = Math.round(width * ASPECT_RATIO);
-    recenterForDimensionChange(
-      colsFor(width, prevSize),
-      rowsFor(height, prevSize),
-      colsFor(width, nextSize),
-      rowsFor(height, nextSize)
-    );
     setCellSize(nextSize);
   }
 
   // Measures the responsive container and keeps the pixel-sized grid in
-  // sync with it, recentering the view when the visible area changes.
+  // sync with it. The view stays centered on `center` automatically since
+  // `offset` is re-derived from it every render.
   useLayoutEffect(() => {
     const el = outerRef.current;
     if (!el) return;
 
-    function applyWidth(width: number) {
-      const prevWidth = wrapperWidthRef.current;
-      if (width === prevWidth) return;
-      const size = cellSizeRef.current;
-      const prevHeight = Math.round(prevWidth * ASPECT_RATIO);
-      const nextHeight = Math.round(width * ASPECT_RATIO);
-      recenterForDimensionChange(
-        colsFor(prevWidth, size),
-        rowsFor(prevHeight, size),
-        colsFor(width, size),
-        rowsFor(nextHeight, size)
-      );
-      setWrapperWidth(width);
+    function measure() {
+      if (!el) return;
+      setWrapperWidth(Math.max(200, Math.round(el.getBoundingClientRect().width)));
     }
 
-    applyWidth(Math.max(200, Math.round(el.getBoundingClientRect().width)));
-
-    const observer = new ResizeObserver((entries) => {
-      applyWidth(Math.max(200, Math.round(entries[0].contentRect.width)));
-    });
+    measure();
+    const observer = new ResizeObserver(() => measure());
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
@@ -196,7 +173,7 @@ export default function GameOfLifeBoard() {
     if (e.button !== 0) return;
     const startClientX = e.clientX;
     const startClientY = e.clientY;
-    const startOffset = offset;
+    const startCenter = center;
     const dragCellSize = cellSize;
     let dragged = false;
 
@@ -207,9 +184,9 @@ export default function GameOfLifeBoard() {
       if (dragged) {
         const dxCells = Math.round(dxPx / dragCellSize);
         const dyCells = Math.round(dyPx / dragCellSize);
-        setOffset({
-          x: startOffset.x - dxCells,
-          y: startOffset.y - dyCells,
+        setCenter({
+          x: startCenter.x - dxCells,
+          y: startCenter.y - dyCells,
         });
       }
     }
@@ -240,7 +217,7 @@ export default function GameOfLifeBoard() {
     let dragged = false;
     let startClientX = 0;
     let startClientY = 0;
-    let startOffset = { x: 0, y: 0 };
+    let startCenter = { x: 0, y: 0 };
     let startCellSize = DEFAULT_CELL_PX;
     let pinchStartDist = 0;
     let tapTarget: { x: number; y: number } | null = null;
@@ -250,7 +227,7 @@ export default function GameOfLifeBoard() {
       dragged = false;
       startClientX = touch.clientX;
       startClientY = touch.clientY;
-      startOffset = offsetRef.current;
+      startCenter = centerRef.current;
       startCellSize = cellSizeRef.current;
       tapTarget = cellFromPoint(touch.clientX, touch.clientY);
     }
@@ -274,9 +251,9 @@ export default function GameOfLifeBoard() {
         if (dragged) {
           const dxCells = Math.round(dxPx / startCellSize);
           const dyCells = Math.round(dyPx / startCellSize);
-          setOffset({
-            x: startOffset.x - dxCells,
-            y: startOffset.y - dyCells,
+          setCenter({
+            x: startCenter.x - dxCells,
+            y: startCenter.y - dyCells,
           });
         }
       } else if (mode === "pinch" && e.touches.length === 2) {
@@ -314,17 +291,14 @@ export default function GameOfLifeBoard() {
       el.removeEventListener("touchend", onTouchEnd);
       el.removeEventListener("touchcancel", onTouchEnd);
     };
-    // applyZoom only reads refs and calls stable setters, so the stale
-    // closure captured here stays correct across renders.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // applyZoom/toggleCell/cellFromPoint only read refs and call stable
+    // setters, so the stale closure captured here stays correct.
   }, []);
 
   function loadPreset(pattern: Pattern) {
     const [w, h] = getPatternSize(pattern);
-    const centerX = offset.x + Math.floor(cols / 2);
-    const centerY = offset.y + Math.floor(rows / 2);
     setLiveCells(
-      placePattern(pattern, centerX - Math.floor(w / 2), centerY - Math.floor(h / 2))
+      placePattern(pattern, center.x - Math.floor(w / 2), center.y - Math.floor(h / 2))
     );
     setGeneration(0);
     setRunning(false);
@@ -349,7 +323,7 @@ export default function GameOfLifeBoard() {
   }
 
   function recenter() {
-    setOffset({ x: -Math.floor(cols / 2), y: -Math.floor(rows / 2) });
+    setCenter(INITIAL_CENTER);
   }
 
   const rowIndices = Array.from({ length: rows }, (_, row) => row);
