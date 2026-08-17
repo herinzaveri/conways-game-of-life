@@ -225,7 +225,28 @@ export default function GameOfLifeBoard() {
     let startCenter = { x: 0, y: 0 };
     let startCellSize = DEFAULT_CELL_PX;
     let pinchStartDist = 0;
+    let pinchStartCellSize = DEFAULT_CELL_PX;
     let tapTarget: { x: number; y: number } | null = null;
+
+    // Pinch zoom is computed from the gesture's total distance ratio
+    // (relative to the cell size when the pinch began) rather than
+    // chaining per-frame deltas through applyZoom - that function's
+    // "nudge by 1 if unchanged" behavior is meant to guarantee progress
+    // on a discrete wheel tick, but it makes continuous pinch input (many
+    // touchmove events per second, each barely off a 1.0 ratio) snap
+    // through the whole zoom range on the slightest finger jitter.
+    function beginPinch(a: Touch, b: Touch) {
+      mode = "pinch";
+      pinchStartDist = touchDistance(a, b);
+      pinchStartCellSize = cellSizeRef.current;
+    }
+
+    function updatePinchZoom(dist: number) {
+      if (pinchStartDist <= 0) return;
+      const target = Math.round(pinchStartCellSize * (dist / pinchStartDist));
+      const clamped = Math.min(MAX_CELL_PX, Math.max(MIN_CELL_PX, target));
+      if (clamped !== cellSizeRef.current) setCellSize(clamped);
+    }
 
     function beginPan(touch: Touch) {
       mode = "pan";
@@ -241,8 +262,7 @@ export default function GameOfLifeBoard() {
       if (e.touches.length === 1) {
         beginPan(e.touches[0]);
       } else if (e.touches.length === 2) {
-        mode = "pinch";
-        pinchStartDist = touchDistance(e.touches[0], e.touches[1]);
+        beginPinch(e.touches[0], e.touches[1]);
       }
     }
 
@@ -263,9 +283,7 @@ export default function GameOfLifeBoard() {
         }
       } else if (mode === "pinch" && e.touches.length === 2) {
         e.preventDefault();
-        const dist = touchDistance(e.touches[0], e.touches[1]);
-        if (pinchStartDist > 0) applyZoom(dist / pinchStartDist);
-        pinchStartDist = dist;
+        updatePinchZoom(touchDistance(e.touches[0], e.touches[1]));
       }
     }
 
@@ -279,8 +297,7 @@ export default function GameOfLifeBoard() {
         mode = "none";
         tapTarget = null;
       } else {
-        mode = "pinch";
-        pinchStartDist = touchDistance(e.touches[0], e.touches[1]);
+        beginPinch(e.touches[0], e.touches[1]);
       }
     }
 
