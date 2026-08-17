@@ -2,6 +2,8 @@
 
 An interactive, infinite-grid implementation of [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life), built with Next.js.
 
+**Live demo:** [cgol.herinzaveri.com](https://cgol.herinzaveri.com/)
+
 ## Features
 
 - **Infinite grid** — cells are tracked sparsely (no fixed board size), so patterns can grow and roam without ever hitting an edge
