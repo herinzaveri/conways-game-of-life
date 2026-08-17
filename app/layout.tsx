@@ -13,8 +13,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Conway's Game of Life",
+  title: "Conway's Game of Life | Herin Zaveri",
   description: "An interactive, infinite-grid implementation of Conway's Game of Life.",
+  icons: {
+    icon: '/favicon.png',
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
