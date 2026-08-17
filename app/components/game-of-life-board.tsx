@@ -11,6 +11,12 @@ import {
   type LiveCells,
   type Pattern,
 } from "@/lib/game-of-life";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  PauseIcon,
+  PlayIcon,
+} from "./transport-icons";
 
 const WRAPPER_WIDTH = 768;
 const WRAPPER_HEIGHT = 448;
@@ -47,14 +53,31 @@ export default function GameOfLifeBoard() {
   const [running, setRunning] = useState(false);
   const [speed, setSpeed] = useState(8);
   const [selectedPreset, setSelectedPreset] = useState<string | null>("Pulsar");
+  const [history, setHistory] = useState<LiveCells[]>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  const liveCellsRef = useRef<LiveCells>(liveCells);
+
+  useEffect(() => {
+    liveCellsRef.current = liveCells;
+  }, [liveCells]);
+
+  function stepForward() {
+    setHistory((h) => [...h, liveCellsRef.current]);
+    setLiveCells((prev) => step(prev));
+    setGeneration((g) => g + 1);
+  }
+
+  function stepBack() {
+    if (history.length === 0) return;
+    const prevState = history[history.length - 1];
+    setHistory((h) => h.slice(0, -1));
+    setLiveCells(prevState);
+    setGeneration((g) => Math.max(0, g - 1));
+  }
 
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => {
-      setLiveCells((prev) => step(prev));
-      setGeneration((g) => g + 1);
-    }, 1000 / speed);
+    const id = setInterval(stepForward, 1000 / speed);
     return () => clearInterval(id);
   }, [running, speed]);
 
@@ -146,6 +169,7 @@ export default function GameOfLifeBoard() {
     setGeneration(0);
     setRunning(false);
     setSelectedPreset(pattern.name);
+    setHistory([]);
   }
 
   function randomize() {
@@ -153,6 +177,7 @@ export default function GameOfLifeBoard() {
     setGeneration(0);
     setRunning(false);
     setSelectedPreset(null);
+    setHistory([]);
   }
 
   function clearBoard() {
@@ -160,6 +185,7 @@ export default function GameOfLifeBoard() {
     setGeneration(0);
     setRunning(false);
     setSelectedPreset(null);
+    setHistory([]);
   }
 
   function recenter() {
@@ -172,22 +198,31 @@ export default function GameOfLifeBoard() {
   return (
     <div className="flex flex-col items-center gap-4">
       <div className="flex flex-wrap items-center justify-center gap-2">
-        <button
-          onClick={() => setRunning((r) => !r)}
-          className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]"
-        >
-          {running ? "Pause" : "Play"}
-        </button>
-        <button
-          onClick={() => {
-            setLiveCells((prev) => step(prev));
-            setGeneration((g) => g + 1);
-          }}
-          disabled={running}
-          className="rounded-full border border-black/8 px-4 py-2 text-sm font-medium transition-colors hover:bg-black/4 disabled:opacity-40 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
-        >
-          Step
-        </button>
+        <div className="flex items-center gap-1 rounded-full border border-black/8 p-1 dark:border-white/[.145]">
+          <button
+            onClick={stepBack}
+            disabled={running || history.length === 0}
+            aria-label="Step back"
+            className="flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-black/4 disabled:opacity-30 disabled:hover:bg-transparent dark:hover:bg-[#1a1a1a]"
+          >
+            <ChevronLeftIcon />
+          </button>
+          <button
+            onClick={() => setRunning((r) => !r)}
+            aria-label={running ? "Pause" : "Play"}
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-foreground text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc]"
+          >
+            {running ? <PauseIcon /> : <PlayIcon />}
+          </button>
+          <button
+            onClick={stepForward}
+            disabled={running}
+            aria-label="Step forward"
+            className="flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-black/4 disabled:opacity-30 disabled:hover:bg-transparent dark:hover:bg-[#1a1a1a]"
+          >
+            <ChevronRightIcon />
+          </button>
+        </div>
         <button
           onClick={randomize}
           className="rounded-full border border-black/8 px-4 py-2 text-sm font-medium transition-colors hover:bg-black/4 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
