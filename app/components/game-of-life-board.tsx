@@ -46,6 +46,7 @@ export default function GameOfLifeBoard() {
   const [generation, setGeneration] = useState(0);
   const [running, setRunning] = useState(false);
   const [speed, setSpeed] = useState(8);
+  const [selectedPreset, setSelectedPreset] = useState<string | null>("Pulsar");
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -93,6 +94,7 @@ export default function GameOfLifeBoard() {
   const rows = rowsForCellSize(cellSize);
 
   function toggleCell(x: number, y: number) {
+    setSelectedPreset(null);
     setLiveCells((prev) => {
       const key = cellKey(x, y);
       const next = new Set(prev);
@@ -143,18 +145,21 @@ export default function GameOfLifeBoard() {
     );
     setGeneration(0);
     setRunning(false);
+    setSelectedPreset(pattern.name);
   }
 
   function randomize() {
     setLiveCells(randomCells(offset.x, offset.y, cols, rows));
     setGeneration(0);
     setRunning(false);
+    setSelectedPreset(null);
   }
 
   function clearBoard() {
     setLiveCells(new Set());
     setGeneration(0);
     setRunning(false);
+    setSelectedPreset(null);
   }
 
   function recenter() {
@@ -224,7 +229,12 @@ export default function GameOfLifeBoard() {
           <button
             key={pattern.name}
             onClick={() => loadPreset(pattern)}
-            className="rounded-full border border-black/8 px-3 py-1 text-sm font-medium transition-colors hover:bg-black/4 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+            aria-pressed={pattern.name === selectedPreset}
+            className={`rounded-full border px-3 py-1 text-sm font-medium transition-colors ${
+              pattern.name === selectedPreset
+                ? "border-foreground bg-foreground text-background"
+                : "border-black/8 hover:bg-black/4 dark:border-white/[.145] dark:hover:bg-[#1a1a1a]"
+            }`}
           >
             {pattern.name}
           </button>
