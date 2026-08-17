@@ -59,14 +59,18 @@ export default function GameOfLifeBoard() {
   // the fact" math needed when zooming or resizing.
   const [center, setCenter] = useState(INITIAL_CENTER);
   const [cellSize, setCellSize] = useState(DEFAULT_CELL_PX);
-  const [wrapperWidth, setWrapperWidth] = useState(MAX_WRAPPER_WIDTH);
+  // Null until the container is measured on mount. The box's on-screen
+  // shape is pure CSS (aspect-ratio classes below) so it's already
+  // correct on first paint; the cell grid itself only renders once we
+  // know the real pixel width, avoiding a flash of desktop-sized content
+  // that then jumps to the right size on mobile.
+  const [wrapperWidth, setWrapperWidth] = useState<number | null>(null);
   const [generation, setGeneration] = useState(0);
   const [running, setRunning] = useState(false);
   const [speed, setSpeed] = useState(8);
   const [selectedPreset, setSelectedPreset] = useState<string | null>("Pulsar");
   const [history, setHistory] = useState<LiveCells[]>([]);
 
-  const outerRef = useRef<HTMLDivElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const liveCellsRef = useRef<LiveCells>(liveCells);
   const centerRef = useRef(center);
@@ -82,8 +86,9 @@ export default function GameOfLifeBoard() {
     cellSizeRef.current = cellSize;
   }, [cellSize]);
 
-  const wrapperHeight = Math.round(wrapperWidth * aspectRatioFor(wrapperWidth));
-  const cols = colsFor(wrapperWidth, cellSize);
+  const effectiveWidth = wrapperWidth ?? MAX_WRAPPER_WIDTH;
+  const wrapperHeight = Math.round(effectiveWidth * aspectRatioFor(effectiveWidth));
+  const cols = colsFor(effectiveWidth, cellSize);
   const rows = rowsFor(wrapperHeight, cellSize);
   const offset = useMemo(
     () => ({
@@ -133,7 +138,7 @@ export default function GameOfLifeBoard() {
   // sync with it. The view stays centered on `center` automatically since
   // `offset` is re-derived from it every render.
   useLayoutEffect(() => {
-    const el = outerRef.current;
+    const el = wrapperRef.current;
     if (!el) return;
 
     function measure() {
@@ -415,17 +420,15 @@ export default function GameOfLifeBoard() {
         <span>Population: {liveCells.size}</span>
       </div>
 
-      <div ref={outerRef} className="w-full max-w-3xl">
-        <div
-          ref={wrapperRef}
-          className="mx-auto select-none overflow-hidden border border-zinc-300 dark:border-zinc-700"
-          style={{
-            width: wrapperWidth,
-            height: wrapperHeight,
-            maxWidth: "100%",
-            touchAction: "none",
-          }}
-        >
+      {/* Shape is pure CSS (matches DESKTOP_ASPECT_RATIO / MOBILE_ASPECT_RATIO
+          and MAX_WRAPPER_WIDTH above) so the box is already correct on the
+          very first paint, before any JS measurement runs. */}
+      <div
+        ref={wrapperRef}
+        className="mx-auto aspect-768/448 w-full max-w-3xl select-none overflow-hidden border border-zinc-300 max-sm:aspect-10/13 dark:border-zinc-700"
+        style={{ touchAction: "none" }}
+      >
+        {wrapperWidth !== null && (
           <div
             style={{
               display: "grid",
@@ -452,7 +455,7 @@ export default function GameOfLifeBoard() {
               })
             )}
           </div>
-        </div>
+        )}
       </div>
 
       <p className="max-w-md text-center text-sm text-zinc-500 dark:text-zinc-500">
